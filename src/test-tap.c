@@ -6,6 +6,7 @@
 int fd = -1;
 int BUFF_LEN = 2049;
 char *dev = "/dev/tap0";
+static int ipv4_configuration_socket = -1;
 
 void tap_close() {
 	if (fd >= 0) close(fd);
@@ -31,7 +32,6 @@ int tap_read(char *buf, int len){
 	return rcount;
 }
 
-#if defined(APPLE)
 /**
  * Sets the IPv4 address for the device, given a string, such as
  * "172.31.0.100". The `prefix_len` specifies how many bits are specifying the
@@ -65,32 +65,44 @@ tap_set_ipv4_addr(const char *presentation, unsigned int prefix_len, char * my_i
         return -1;
     }
 
+#if defined(APPLE)
     //tap_plen_to_ipv4_mask(prefix_len, &ifr.ifr_netmask);
     if (ioctl(ipv4_configuration_socket, SIOCSIFNETMASK, &ifr) < 0) {
         fprintf(stderr, "Failed to set IPv4 tap device netmask - %s:%d\n", __FILE__, __LINE__);
         tap_close();
         return -1;
     }
+#endif
     return 0;
 }
-#endif
 
 int main(int argc, const char *argv[]) {
 	unsigned char buf[BUFF_LEN], bufcpy[BUFF_LEN], bufout[BUFF_LEN];
 	int buf_len;
+	char ipv4_addr[4*4] = { 0 };
+	memset(&ifr, 0, sizeof ifr);
+	strcpy(ipv4_addr, "192.168.0.165");
+
 	if (tap_open(dev)<0){
 		return -1;
 	}
 	fprintf(stderr, "Tap device opened\n");
+
+	ifr.ifr_flags = IFF_UP;
 //Configuring ip address
-/*
-	if (ioctl(fd, SIOCSIFADDR, &ifr) < 0) {
-		fprintf(stderr, "Failed to set IPv4 tap device address - %s:%d\n", __FILE__, __LINE__);
-		tap_close();
-		return -1;
-	}*/
+    // Create the "throw-away" socket that we'll use to configure the device
+	strcpy(ifr.ifr_name, dev);
+	if ((ipv4_configuration_socket = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		fprintf(stderr, "UDP IPv4 socket construction failed - %s:%d.\n", __FILE__, __LINE__);
+		tap_close(); return -1;
+	}
+
+	char myip[4];
+	tap_set_ipv4_addr(ipv4_addr, 24, myip);
+
+/////////////////// 
 	fprintf(stderr, "ifconfig tap0 192.168.0.165/24 up\n");
-	system("dtruss ifconfig tap0 192.168.0.165/24 up");
+	//system("dtruss ifconfig tap0 192.168.0.165/24 up");
 	while (1){
 		memset(&buf, 0, BUFF_LEN);
 		buf_len=tap_read(buf, BUFF_LEN);
